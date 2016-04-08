@@ -18,6 +18,7 @@ import xarray as xr  # only for Dataset and DataArray
 
 try:
     import dask.array as da
+    from dask.threaded import get as _threaded_get
 except ImportError:
     pass
 
@@ -167,6 +168,11 @@ def _as_array_or_item(data):
     return data
 
 
+def _finalize_variable(results, dims=None, attrs=None, encoding=None):
+    data = da.core.finalize(results)
+    return Variable(dims, data, attrs, encoding, fastpath=True)
+
+
 class Variable(common.AbstractArray, utils.NdimSizeLenMixin):
 
     """A netcdf-like variable consisting of dimensions, data and attributes
@@ -217,6 +223,27 @@ class Variable(common.AbstractArray, utils.NdimSizeLenMixin):
             self.attrs = attrs
         if encoding is not None:
             self.encoding = encoding
+
+    @property
+    def _dask_keys_(self):
+        return self._data._dask_keys_
+
+    @property
+    def _dask_graph_(self):
+        return self._data._dask_graph_
+
+    @property
+    def _dask_default_get_(self):
+        return _threaded_get
+
+    @property
+    def _dask_finalize_(self):
+        return functools.partial(_finalize_variable, dims=self._dims,
+                                 attrs=self._attrs, encoding=self._encoding)
+
+    @property
+    def _dask_optimize_(self):
+        return da.core.optimize
 
     @property
     def dtype(self):

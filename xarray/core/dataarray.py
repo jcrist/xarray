@@ -18,8 +18,15 @@ from .coordinates import DataArrayCoordinates, Indexes
 from .dataset import Dataset
 from .pycompat import iteritems, basestring, OrderedDict, zip
 from .variable import (as_variable, Variable, as_compatible_data, Coordinate,
-                       default_index_coordinate)
+                       default_index_coordinate, _finalize_variable)
 from .formatting import format_item
+
+
+try:
+    import dask.array as da
+    from dask.threaded import get as _threaded_get
+except ImportError:
+    pass
 
 
 def _infer_coords_and_dims(shape, coords, dims):
@@ -112,6 +119,11 @@ class _ThisArray(object):
     """
     def __repr__(self):
         return '<this-array>'
+
+
+def _finalize_dataarray(results, finalize_var=None, coords=None, name=None):
+    var = finalize_var(results)
+    return DataArray(var, coords=coords, name=name, fastpath=True)
 
 
 class DataArray(AbstractArray, BaseDataObject):
@@ -225,6 +237,28 @@ class DataArray(AbstractArray, BaseDataObject):
         self._initialized = True
 
     __default = object()
+
+    @property
+    def _dask_graph_(self):
+        return self._variable._dask_graph_
+
+    @property
+    def _dask_keys_(self):
+        return self._variable._dask_keys_
+
+    @property
+    def _dask_default_get_(self):
+        return _threaded_get
+
+    @property
+    def _dask_optimize_(self):
+        return da.core.optimize
+
+    @property
+    def _dask_finalize_(self):
+        fv = self._variable._dask_finalize_
+        return functools.partial(_finalize_dataarray, finalize_var=fv,
+                                 coords=self._coords, name=self._name)
 
     def _replace(self, variable=None, coords=None, name=__default):
         if variable is None:
